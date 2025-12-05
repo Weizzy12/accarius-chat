@@ -40,19 +40,55 @@ db.serialize(() => {
     FOREIGN KEY (user_id) REFERENCES users(id)
   )`);
 
-  // Создаём первого админа и код
+  // Создаём первый инвайт-код
   db.run("INSERT OR IGNORE INTO invite_codes (code, created_by) VALUES ('ADMIN123', 0)");
   
+  // Создаём тестового админа если нет пользователей
+  db.get("SELECT COUNT(*) as count FROM users", (err, row) => {
+    if (err) {
+      console.error('Ошибка проверки пользователей:', err);
+      return;
+    }
+    
+    if (row.count === 0) {
+      console.log('👤 Создаём тестового администратора...');
+      db.run(
+        `INSERT INTO users (nickname, tg_username, role, avatar_color) 
+         VALUES (?, ?, ?, ?)`,
+        ['Администратор', '@admin', 'admin', '#3498db'],
+        function(err) {
+          if (err) {
+            console.error('Ошибка создания администратора:', err);
+          } else {
+            console.log(`✅ Администратор создан с ID: ${this.lastID}`);
+            
+            // Обновляем код с использовавшим его админом
+            db.run(
+              "UPDATE invite_codes SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE code = 'ADMIN123'",
+              [this.lastID]
+            );
+          }
+        }
+      );
+    }
+  });
+  
   console.log('✅ База данных инициализирована');
-  console.log('🔑 Первый код: ADMIN123');
+  console.log('🔑 Инвайт-код для входа: ADMIN123');
 });
 
 // Функции для работы с БД
 function query(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
+      if (err) {
+        console.error('❌ Ошибка SQL query:', err);
+        console.error('SQL:', sql);
+        console.error('Params:', params);
+        reject(err);
+      } else {
+        resolve(rows);
+      }
     });
   });
 }
@@ -60,8 +96,14 @@ function query(sql, params = []) {
 function run(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function(err) {
-      if (err) reject(err);
-      else resolve({ id: this.lastID, changes: this.changes });
+      if (err) {
+        console.error('❌ Ошибка SQL run:', err);
+        console.error('SQL:', sql);
+        console.error('Params:', params);
+        reject(err);
+      } else {
+        resolve({ id: this.lastID, changes: this.changes });
+      }
     });
   });
 }
@@ -69,8 +111,14 @@ function run(sql, params = []) {
 function get(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
+      if (err) {
+        console.error('❌ Ошибка SQL get:', err);
+        console.error('SQL:', sql);
+        console.error('Params:', params);
+        reject(err);
+      } else {
+        resolve(row);
+      }
     });
   });
 }
