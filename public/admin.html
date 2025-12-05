@@ -42,7 +42,7 @@
                 </button>
             </div>
             
-            <div id="newCodeAlert" class="alert alert-success" style="display: none; background: #c6f6d5; color: #22543d; padding: 12px; border-radius: 8px; margin-bottom: 20px;">
+            <div id="newCodeAlert" class="alert alert-success" style="display: none;">
                 <i class="fas fa-check-circle"></i> Новый код создан: <strong id="newCodeValue"></strong>
                 <button onclick="copyCode()" class="btn btn-secondary" style="margin-left: 10px; padding: 5px 10px;">
                     <i class="fas fa-copy"></i> Копировать
@@ -71,7 +71,7 @@
         <!-- Вкладка пользователей -->
         <div id="users" class="tab-content">
             <div class="section-header">
-                <h2><i class="fas fa-users"></i> Управление пользователями</h2>
+                <h2><i class="fas fa-users"></i> Управление пользователей</h2>
                 <div>
                     <input type="text" id="userSearch" placeholder="Поиск пользователей..." class="form-input" 
                            style="width: 250px; margin-right: 10px;" onkeyup="searchUsers()">
@@ -139,12 +139,7 @@
                         </tr>
                     </thead>
                     <tbody id="activityTable">
-                        <tr>
-                            <td>12:30</td>
-                            <td>Админ</td>
-                            <td>Вошел в систему</td>
-                            <td>Вход в админ-панель</td>
-                        </tr>
+                        <!-- Активность загружается здесь -->
                     </tbody>
                 </table>
             </div>
@@ -152,12 +147,8 @@
     </div>
     
     <script>
-        // ========== ПЕРЕМЕННЫЕ ==========
-        let currentAdminUser = {
-            id: 1,
-            nickname: 'Админ',
-            role: 'admin'
-        };
+        // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
+        let currentAdminUser = null;
         let allUsers = [];
         let allCodes = [];
         
@@ -165,97 +156,203 @@
         
         // 1. Загрузка данных админа
         async function loadAdminData() {
-            console.log('👑 Загружаем админку...');
+            console.log('👑 Загрузка данных админа...');
             
-            // ВСЕГДА админ
-            currentAdminUser = {
-                id: 1,
-                nickname: 'Администратор',
-                role: 'admin'
-            };
-            
-            // Загружаем всё
-            await loadCodes();
-            await loadUsers();
-            await loadStats();
-            
-            console.log('✅ Админка готова');
+            try {
+                // Проверяем, есть ли сохранённый пользователь
+                const savedUser = localStorage.getItem('user');
+                if (savedUser) {
+                    currentAdminUser = JSON.parse(savedUser);
+                    console.log('✅ Используем сохранённого пользователя:', currentAdminUser.nickname);
+                } else {
+                    // Если нет сохранённого, запрашиваем у сервера
+                    const response = await fetch('/api/user');
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        currentAdminUser = data.user;
+                        console.log('✅ Пользователь получен с сервера:', currentAdminUser.nickname);
+                    } else {
+                        throw new Error('Не удалось получить данные пользователя');
+                    }
+                }
+                
+                // Проверяем, что пользователь админ
+                if (currentAdminUser.role !== 'admin') {
+                    console.error('❌ Пользователь не админ:', currentAdminUser.role);
+                    alert('Доступ запрещён. Требуются права администратора.');
+                    window.location.href = 'chat.html';
+                    return;
+                }
+                
+                console.log('✅ Админ подтверждён, загружаем данные...');
+                await loadAllData();
+                
+            } catch (error) {
+                console.error('❌ Ошибка загрузки админ-данных:', error);
+                alert('Ошибка загрузки админ-панели. Проверьте соединение с сервером.');
+                window.location.href = 'chat.html';
+            }
         }
         
-        // 2. Загрузка кодов
+        // 2. Загрузка всех данных
+        async function loadAllData() {
+            console.log('📊 Загрузка всех данных...');
+            
+            try {
+                await Promise.all([
+                    loadCodes(),
+                    loadUsers(),
+                    loadStats()
+                ]);
+                
+                console.log('✅ Все данные загружены');
+            } catch (error) {
+                console.error('❌ Ошибка загрузки всех данных:', error);
+            }
+        }
+        
+        // 3. Загрузка кодов
         async function loadCodes() {
             try {
-                const response = await fetch('/api/admin/codes');
+                console.log('🔑 Загрузка инвайт-кодов...');
+                
+                const response = await fetch(`/api/admin/codes?adminId=${currentAdminUser.id}`);
                 const data = await response.json();
                 
                 if (data.success) {
                     allCodes = data.codes;
+                    console.log(`✅ Загружено ${allCodes.length} кодов`);
                     displayCodes(allCodes);
+                } else {
+                    console.error('❌ Ошибка загрузки кодов:', data.message);
+                    alert('Ошибка загрузки кодов: ' + data.message);
                 }
             } catch (error) {
-                console.error('❌ Ошибка кодов:', error);
+                console.error('❌ Ошибка загрузки кодов:', error);
                 displayCodes([]);
             }
         }
         
-        // 3. Отображение кодов
+        // 4. Отображение кодов в таблице
         function displayCodes(codes) {
             const table = document.getElementById('codesTable');
             if (!table) return;
             
             table.innerHTML = '';
             
+            if (codes.length === 0) {
+                table.innerHTML = `
+                    <tr>
+                        <td colspan="6" style="text-align: center; padding: 30px;">
+                            <i class="fas fa-inbox" style="font-size: 48px; color: #ccc; margin-bottom: 10px;"></i>
+                            <p>Нет инвайт-кодов</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
             codes.forEach(code => {
                 const row = document.createElement('tr');
                 
-                const statusClass = code.is_active ? 'status-active' : 'status-inactive';
-                const statusText = code.is_active ? 'Активен' : 'Неактивен';
+                // Определяем статус
+                let statusClass = 'status-inactive';
+                let statusText = 'Неактивен';
+                
+                if (code.is_active) {
+                    if (code.used_by) {
+                        statusClass = 'status-used';
+                        statusText = 'Использован';
+                    } else {
+                        statusClass = 'status-active';
+                        statusText = 'Активен';
+                    }
+                }
+                
+                // Форматируем даты
+                const createdDate = code.created_at ? new Date(code.created_at).toLocaleDateString('ru-RU') : '-';
+                const usedDate = code.used_at ? new Date(code.used_at).toLocaleDateString('ru-RU') : '-';
                 
                 row.innerHTML = `
                     <td><strong>${code.code}</strong></td>
-                    <td>${new Date(code.created_at).toLocaleDateString()}</td>
+                    <td>${createdDate}</td>
+                    <td>${usedDate}</td>
                     <td>${code.used_by_nickname || '-'}</td>
-                    <td>${code.used_by_nickname || 'Не использован'}</td>
                     <td><span class="status-badge ${statusClass}">${statusText}</span></td>
-                    <td>
-                        <button onclick="deactivateCode('${code.code}')" class="btn btn-danger btn-small">
-                            <i class="fas fa-times"></i> Отозвать
-                        </button>
+                    <td class="actions">
+                        ${code.is_active && !code.used_by ? 
+                            `<button onclick="deactivateCode('${code.code}')" class="btn btn-danger btn-small">
+                                <i class="fas fa-times"></i> Отозвать
+                            </button>` : ''
+                        }
+                        ${code.used_by ? 
+                            `<button onclick="viewUserProfile(${code.used_by})" class="btn btn-secondary btn-small">
+                                <i class="fas fa-eye"></i> Профиль
+                            </button>` : ''
+                        }
                     </td>
                 `;
                 table.appendChild(row);
             });
         }
         
-        // 4. Загрузка пользователей
+        // 5. Загрузка пользователей
         async function loadUsers() {
             try {
-                const response = await fetch('/api/admin/users');
+                console.log('👥 Загрузка пользователей...');
+                
+                const response = await fetch(`/api/admin/users?adminId=${currentAdminUser.id}`);
                 const data = await response.json();
                 
                 if (data.success) {
                     allUsers = data.users;
+                    console.log(`✅ Загружено ${allUsers.length} пользователей`);
                     displayUsers(allUsers);
+                } else {
+                    console.error('❌ Ошибка загрузки пользователей:', data.message);
+                    alert('Ошибка загрузки пользователей: ' + data.message);
                 }
             } catch (error) {
-                console.error('❌ Ошибка пользователей:', error);
+                console.error('❌ Ошибка загрузки пользователей:', error);
                 displayUsers([]);
             }
         }
         
-        // 5. Отображение пользователей
+        // 6. Отображение пользователей в таблице
         function displayUsers(users) {
             const table = document.getElementById('usersTable');
             if (!table) return;
             
             table.innerHTML = '';
             
+            if (users.length === 0) {
+                table.innerHTML = `
+                    <tr>
+                        <td colspan="8" style="text-align: center; padding: 30px;">
+                            <i class="fas fa-users" style="font-size: 48px; color: #ccc; margin-bottom: 10px;"></i>
+                            <p>Нет пользователей</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
             users.forEach(user => {
                 const row = document.createElement('tr');
                 
-                const roleBadge = user.role === 'admin' 
-                    ? '<span class="status-badge status-active">👑 Админ</span>'
-                    : '<span class="status-badge status-inactive">👤 Пользователь</span>';
+                // Статус бана
+                const isBanned = user.is_banned;
+                const statusClass = isBanned ? 'status-used' : 'status-active';
+                const statusText = isBanned ? 'Забанен' : 'Активен';
+                
+                // Роль
+                const roleBadge = user.role === 'admin' ? 
+                    '<span class="status-badge status-active">👑 Админ</span>' : 
+                    '<span class="status-badge status-inactive">👤 Пользователь</span>';
+                
+                // Дата регистрации
+                const regDate = user.created_at ? new Date(user.created_at).toLocaleDateString('ru-RU') : '-';
                 
                 row.innerHTML = `
                     <td>${user.id}</td>
@@ -270,18 +367,22 @@
                     <td>${user.tg_username || 'Не указан'}</td>
                     <td>${roleBadge}</td>
                     <td>${user.message_count || 0}</td>
-                    <td>${new Date(user.created_at).toLocaleDateString()}</td>
-                    <td>${user.is_banned ? '❌ Забанен' : '✅ Активен'}</td>
-                    <td>
-                        <button onclick="toggleBanUser(${user.id}, ${user.is_banned})" 
-                                class="btn ${user.is_banned ? 'btn-success' : 'btn-danger'} btn-small">
-                            <i class="fas ${user.is_banned ? 'fa-check' : 'fa-ban'}"></i>
-                            ${user.is_banned ? 'Разбанить' : 'Забанить'}
+                    <td>${regDate}</td>
+                    <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                    <td class="actions">
+                        <button onclick="viewUserProfile(${user.id})" class="btn btn-secondary btn-small">
+                            <i class="fas fa-eye"></i>
                         </button>
-                        ${user.role !== 'admin' ? `
-                            <button onclick="makeAdminUser(${user.id})" class="btn btn-success btn-small">
-                                <i class="fas fa-crown"></i> Админ
+                        ${user.id !== currentAdminUser.id ? `
+                            <button onclick="toggleBanUser(${user.id}, ${isBanned})" 
+                                    class="btn ${isBanned ? 'btn-success' : 'btn-danger'} btn-small">
+                                <i class="fas ${isBanned ? 'fa-check' : 'fa-ban'}"></i>
                             </button>
+                            ${user.role !== 'admin' ? `
+                                <button onclick="makeAdminUser(${user.id})" class="btn btn-success btn-small">
+                                    <i class="fas fa-crown"></i>
+                                </button>
+                            ` : ''}
                         ` : ''}
                     </td>
                 `;
@@ -289,7 +390,7 @@
             });
         }
         
-        // 6. Поиск пользователей
+        // 7. Поиск пользователей
         function searchUsers() {
             const searchTerm = document.getElementById('userSearch').value.toLowerCase();
             
@@ -307,154 +408,334 @@
             displayUsers(filteredUsers);
         }
         
-        // 7. Загрузка статистики
+        // 8. Загрузка статистики
         async function loadStats() {
-            document.getElementById('totalUsers').textContent = allUsers.length;
-            document.getElementById('totalCodes').textContent = allCodes.length;
-            document.getElementById('totalMessages').textContent = allUsers.reduce((sum, u) => sum + (u.message_count || 0), 0);
-            document.getElementById('activeToday').textContent = allUsers.length;
+            try {
+                console.log('📈 Загрузка статистики...');
+                
+                // Обновляем счетчики
+                document.getElementById('totalUsers').textContent = allUsers.length;
+                document.getElementById('totalCodes').textContent = allCodes.length;
+                
+                // Считаем активных сегодня
+                const today = new Date().toDateString();
+                const activeToday = allUsers.filter(user => {
+                    if (!user.created_at) return false;
+                    const userDate = new Date(user.created_at).toDateString();
+                    return userDate === today;
+                }).length;
+                
+                document.getElementById('activeToday').textContent = activeToday;
+                
+                // Считаем сообщения
+                const totalMessages = allUsers.reduce((sum, user) => sum + (user.message_count || 0), 0);
+                document.getElementById('totalMessages').textContent = totalMessages;
+                
+                // Загружаем активность (последние 10 сообщений)
+                const messagesResponse = await fetch('/api/messages');
+                const messagesData = await messagesResponse.json();
+                
+                if (messagesData.success) {
+                    displayActivity(messagesData.messages.slice(-10).reverse());
+                }
+                
+                console.log('✅ Статистика загружена');
+                
+            } catch (error) {
+                console.error('❌ Ошибка загрузки статистики:', error);
+            }
+        }
+        
+        // 9. Отображение активности
+        function displayActivity(messages) {
+            const table = document.getElementById('activityTable');
+            if (!table) return;
+            
+            table.innerHTML = '';
+            
+            if (messages.length === 0) {
+                table.innerHTML = `
+                    <tr>
+                        <td colspan="4" style="text-align: center; padding: 30px;">
+                            <i class="fas fa-history" style="font-size: 48px; color: #ccc; margin-bottom: 10px;"></i>
+                            <p>Нет активности</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            messages.forEach(msg => {
+                const row = document.createElement('tr');
+                const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('ru-RU') : '-';
+                
+                row.innerHTML = `
+                    <td>${time}</td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div class="user-avatar-small" style="background-color: ${msg.avatar_color}">
+                                ${msg.nickname.charAt(0).toUpperCase()}
+                            </div>
+                            ${msg.nickname}
+                        </div>
+                    </td>
+                    <td>Отправил сообщение</td>
+                    <td>${msg.text ? (msg.text.length > 50 ? msg.text.substring(0, 50) + '...' : msg.text) : '-'}</td>
+                `;
+                table.appendChild(row);
+            });
         }
         
         // ========== ДЕЙСТВИЯ АДМИНА ==========
         
+        // 10. Генерация нового кода
         async function generateCode() {
             try {
+                console.log('🔄 Генерация нового инвайт-кода...');
+                
                 const response = await fetch('/api/admin/generate-code', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        userId: currentAdminUser.id 
+                    })
                 });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 
                 const data = await response.json();
                 
                 if (data.success) {
+                    console.log('✅ Код создан:', data.code);
+                    
+                    // Показываем уведомление
                     const alertDiv = document.getElementById('newCodeAlert');
                     const codeSpan = document.getElementById('newCodeValue');
                     
                     codeSpan.textContent = data.code;
                     alertDiv.style.display = 'block';
                     
+                    // Обновляем список кодов
                     await loadCodes();
+                    
+                    // Автоматически скрываем уведомление через 10 секунд
+                    setTimeout(() => {
+                        alertDiv.style.display = 'none';
+                    }, 10000);
+                } else {
+                    console.error('❌ Ошибка генерации кода:', data.message);
+                    alert('Ошибка: ' + data.message);
                 }
             } catch (error) {
-                console.error('❌ Ошибка генерации:', error);
-                alert('Код создан: CHAT-TEST123');
-                await loadCodes();
+                console.error('❌ Ошибка генерации кода:', error);
+                alert('Ошибка соединения с сервером. Проверьте интернет.');
             }
         }
         
+        // 11. Копирование кода в буфер обмена
         function copyCode() {
             const code = document.getElementById('newCodeValue').textContent;
             navigator.clipboard.writeText(code).then(() => {
-                alert('Код скопирован в буфер обмена!');
+                alert('✅ Код скопирован в буфер обмена!');
+            }).catch(err => {
+                console.error('❌ Ошибка копирования:', err);
+                alert('❌ Не удалось скопировать код');
             });
         }
         
+        // 12. Деактивация кода
         async function deactivateCode(code) {
-            if (confirm(`Отозвать код ${code}?`)) {
-                try {
-                    const response = await fetch('/api/admin/deactivate-code', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ code: code })
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (data.success) {
-                        alert('✅ Код отозван');
-                        await loadCodes();
-                    }
-                } catch (error) {
-                    console.error('❌ Ошибка отзыва:', error);
-                    alert('✅ Код отозван (тестовый режим)');
-                    await loadCodes();
+            if (!confirm(`Отозвать код ${code}? Его нельзя будет использовать для регистрации.`)) {
+                return;
+            }
+            
+            try {
+                console.log(`🔄 Деактивация кода: ${code}`);
+                
+                const response = await fetch('/api/admin/deactivate-code', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        code: code 
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    console.log('✅ Код отозван');
+                    alert('✅ Код отозван');
+                    await loadCodes();
+                } else {
+                    console.error('❌ Ошибка деактивации:', data.message);
+                    alert('Ошибка: ' + data.message);
+                }
+            } catch (error) {
+                console.error('❌ Ошибка деактивации кода:', error);
+                alert('Ошибка соединения с сервером.');
             }
         }
         
+        // 13. Просмотр профиля пользователя
+        function viewUserProfile(userId) {
+            console.log(`👤 Просмотр профиля пользователя ID: ${userId}`);
+            window.location.href = `chat.html?profile=${userId}`;
+        }
+        
+        // 14. Бан/разбан пользователя
         async function toggleBanUser(userId, isBanned) {
             const action = isBanned ? 'unban' : 'ban';
+            const confirmText = isBanned ? 
+                'Разбанить пользователя?' : 
+                'Забанить пользователя?';
             
-            if (confirm(isBanned ? 'Разбанить пользователя?' : 'Забанить пользователя?')) {
-                try {
-                    const response = await fetch('/api/admin/ban-user', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ userId: userId, action: action })
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (data.success) {
-                        alert(isBanned ? '✅ Пользователь разбанен' : '✅ Пользователь забанен');
-                        await loadUsers();
-                    }
-                } catch (error) {
-                    console.error('❌ Ошибка бана:', error);
-                    alert('✅ Действие выполнено');
-                    await loadUsers();
+            if (!confirm(confirmText)) return;
+            
+            try {
+                console.log(`🔄 ${action} пользователя ID: ${userId}`);
+                
+                const response = await fetch('/api/admin/ban-user', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        userId: userId, 
+                        action: action 
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    console.log(`✅ Пользователь ${action === 'ban' ? 'забанен' : 'разбанен'}`);
+                    alert(isBanned ? '✅ Пользователь разбанен' : '✅ Пользователь забанен');
+                    await loadUsers();
+                } else {
+                    console.error(`❌ Ошибка ${action}:`, data.message);
+                    alert('Ошибка: ' + data.message);
+                }
+            } catch (error) {
+                console.error(`❌ Ошибка ${action} пользователя:`, error);
+                alert('Ошибка соединения с сервером.');
             }
         }
         
+        // 15. Назначить админом
         async function makeAdminUser(userId) {
-            if (confirm('Сделать пользователя админом?')) {
-                try {
-                    const response = await fetch('/api/admin/ban-user', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ userId: userId, action: 'make_admin' })
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (data.success) {
-                        alert('✅ Пользователь теперь админ');
-                        await loadUsers();
-                    }
-                } catch (error) {
-                    console.error('❌ Ошибка назначения:', error);
-                    alert('✅ Пользователь теперь админ');
-                    await loadUsers();
+            if (!confirm('Сделать этого пользователя администратором?')) return;
+            
+            try {
+                console.log(`🔄 Назначение пользователя ID: ${userId} админом`);
+                
+                const response = await fetch('/api/admin/ban-user', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        userId: userId, 
+                        action: 'make_admin' 
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    console.log('✅ Пользователь назначен админом');
+                    alert('✅ Пользователь теперь администратор');
+                    await loadUsers();
+                } else {
+                    console.error('❌ Ошибка назначения админа:', data.message);
+                    alert('Ошибка: ' + data.message);
+                }
+            } catch (error) {
+                console.error('❌ Ошибка назначения админа:', error);
+                alert('Ошибка соединения с сервером.');
             }
         }
         
-        // ========== ВКЛАДКИ ==========
+        // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
         
+        // 16. Переключение между вкладками
         function openTab(tabName) {
-            // Скрыть все вкладки
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
+            console.log(`📁 Переключение на вкладку: ${tabName}`);
             
-            // Убрать активность у кнопок
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
+            // Скрываем все вкладки
+            const tabContents = document.getElementsByClassName('tab-content');
+            for (let i = 0; i < tabContents.length; i++) {
+                tabContents[i].classList.remove('active');
+            }
             
-            // Показать выбранную
+            // Убираем активный класс у всех кнопок
+            const tabButtons = document.getElementsByClassName('tab-btn');
+            for (let i = 0; i < tabButtons.length; i++) {
+                tabButtons[i].classList.remove('active');
+            }
+            
+            // Показываем выбранную вкладку
             document.getElementById(tabName).classList.add('active');
+            
+            // Добавляем активный класс к нажатой кнопке
             event.currentTarget.classList.add('active');
             
-            // Обновить данные если статистика
+            // Обновляем данные на вкладке
             if (tabName === 'stats') {
                 loadStats();
             }
         }
         
-        // ========== ВЫХОД ==========
-        
+        // 17. Выход
         function logout() {
+            console.log('🚪 Выход из системы...');
             localStorage.removeItem('user');
             window.location.href = '/index.html';
         }
         
-        // ========== ЗАГРУЗКА ==========
+        // ========== ИНИЦИАЛИЗАЦИЯ ==========
         
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('🚀 Админка загружается...');
+            console.log('🚀 Админ-панель инициализируется...');
+            
+            // Загружаем данные админа
             loadAdminData();
+            
+            // Автозагрузка данных каждые 30 секунд
+            setInterval(() => {
+                if (document.querySelector('.tab-content.active').id === 'users') {
+                    loadUsers();
+                }
+            }, 30000);
+            
+            // Периодическая проверка авторизации
+            setInterval(() => {
+                if (!currentAdminUser || currentAdminUser.role !== 'admin') {
+                    console.log('🔒 Потеряна авторизация, перезагрузка...');
+                    loadAdminData();
+                }
+            }, 60000);
         });
     </script>
 </body>
