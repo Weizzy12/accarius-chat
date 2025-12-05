@@ -19,7 +19,7 @@
             
             <div class="sidebar-footer">
                 <div id="currentUser" class="current-user"></div>
-                <button onclick="window.location.href='/admin.html'" id="adminBtn" style="display: block;">
+                <button onclick="window.location.href='/admin.html'" id="adminBtn" style="display: none;">
                     <i class="fas fa-cog"></i> Админка
                 </button>
             </div>
@@ -32,6 +32,9 @@
                 <h2><i class="fas fa-comments"></i> Общий чат</h2>
                 <div class="chat-info">
                     <span id="messageCount">0 сообщений</span>
+                    <button onclick="testConnection()" class="btn btn-warning" style="margin-left: 10px; padding: 8px 15px;">
+                        <i class="fas fa-wifi"></i> Тест
+                    </button>
                 </div>
             </div>
             
@@ -45,9 +48,6 @@
                 <input type="text" id="messageInput" placeholder="Напишите сообщение..." class="message-input">
                 <button onclick="sendMessage()" class="send-btn">
                     <i class="fas fa-paper-plane"></i>
-                </button>
-                <button onclick="testMessage()" class="btn btn-success" style="margin-left: 10px;">
-                    <i class="fas fa-bolt"></i> Тест
                 </button>
             </div>
         </div>
@@ -76,49 +76,106 @@
     <!-- Подключаем Socket.io клиент -->
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        // ========== ОСНОВНЫЕ ПЕРЕМЕННЫЕ ==========
-        let currentUser = {
-            id: 1,
-            nickname: 'Админ',
-            role: 'admin',
-            avatar_color: '#3498db'
-        };
+        // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
+        const socket = io(window.location.origin, {
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000
+        });
+        
+        let currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         let selectedUserId = null;
         let onlineUsers = [];
         
-        // ========== WebSocket ==========
-        const socket = io(window.location.origin, {
-            transports: ['websocket', 'polling'],
-            reconnection: true
-        });
-        
-        // ========== СИСТЕМНЫЕ ФУНКЦИИ ==========
+        // ========== ОСНОВНЫЕ ФУНКЦИИ ==========
         
         // 1. Загрузка данных пользователя
         async function loadUserData() {
+            console.log('👤 Загрузка данных пользователя...');
+            
             try {
-                const response = await fetch('/api/user');
+                // Проверяем, есть ли сохранённый пользователь
+                if (currentUser && currentUser.id) {
+                    console.log('✅ Используем сохранённого пользователя:', currentUser.nickname);
+                    updateCurrentUserDisplay();
+                    
+                    // Показываем кнопку админки если пользователь админ
+                    if (currentUser.role === 'admin') {
+                        document.getElementById('adminBtn').style.display = 'block';
+                    }
+                    
+                    // Сообщаем серверу о подключении
+                    if (socket.connected) {
+                        socket.emit('user_online', {
+                            id: currentUser.id,
+                            nickname: currentUser.nickname,
+                            avatar_color: currentUser.avatar_color
+                        });
+                    }
+                    
+                    return;
+                }
+                
+                // Если нет сохранённого пользователя, запрашиваем у сервера
+                console.log('📡 Запрашиваем данные пользователя с сервера...');
+                const response = await fetch('/api/user', {
+                    headers: {
+                        'Authorization': JSON.stringify(currentUser),
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
                 const data = await response.json();
+                console.log('📊 Ответ сервера:', data);
                 
                 if (data.success) {
                     currentUser = data.user;
-                    console.log('✅ Пользователь загружен:', currentUser);
+                    localStorage.setItem('user', JSON.stringify(data.user));
+                    
+                    console.log('✅ Пользователь получен:', currentUser.nickname);
+                    updateCurrentUserDisplay();
+                    
+                    // Показываем кнопку админки если пользователь админ
+                    if (currentUser.role === 'admin') {
+                        document.getElementById('adminBtn').style.display = 'block';
+                        console.log('👑 Пользователь админ, показываем кнопку админки');
+                    }
+                    
+                    // Сообщаем серверу о подключении
+                    if (socket.connected) {
+                        socket.emit('user_online', {
+                            id: currentUser.id,
+                            nickname: currentUser.nickname,
+                            avatar_color: currentUser.avatar_color
+                        });
+                    }
                 } else {
-                    console.log('⚠️ Используем тестового пользователя');
+                    console.error('❌ Ошибка получения пользователя:', data.message);
+                    window.location.href = '/index.html';
                 }
-                
-                // ВСЕГДА показываем кнопку админки
-                document.getElementById('adminBtn').style.display = 'block';
-                updateCurrentUserDisplay();
                 
             } catch (error) {
                 console.error('❌ Ошибка загрузки пользователя:', error);
-                document.getElementById('adminBtn').style.display = 'block';
-                updateCurrentUserDisplay();
+                
+                // Если ошибка, пробуем использовать тестового пользователя
+                if (!currentUser.id) {
+                    currentUser = {
+                        id: 1,
+                        nickname: 'Тестовый пользователь',
+                        role: 'user',
+                        avatar_color: '#3498db'
+                    };
+                    updateCurrentUserDisplay();
+                }
             }
         }
         
-        // 2. Обновить отображение текущего пользователя
+        // 2. Обновление отображения текущего пользователя
         function updateCurrentUserDisplay() {
             const userDiv = document.getElementById('currentUser');
             if (userDiv) {
@@ -134,23 +191,51 @@
             }
         }
         
-        // 3. Отправка сообщения
+        // 3. Обновление списка онлайн пользователей
+        function updateOnlineUsers(users) {
+            onlineUsers = users;
+            const usersList = document.getElementById('usersList');
+            const onlineCount = document.getElementById('onlineCount');
+            
+            if (usersList && onlineCount) {
+                usersList.innerHTML = '';
+                onlineCount.textContent = users.length;
+                
+                users.forEach(user => {
+                    const userDiv = document.createElement('div');
+                    userDiv.className = 'online-user';
+                    userDiv.onclick = () => showProfile(user.id);
+                    userDiv.innerHTML = `
+                        <div class="user-avatar-small" style="background-color: ${user.avatar_color}">
+                            ${user.nickname.charAt(0).toUpperCase()}
+                        </div>
+                        <div class="user-details">
+                            <strong>${user.nickname}</strong>
+                            ${user.role === 'admin' ? '<small>👑</small>' : ''}
+                        </div>
+                    `;
+                    usersList.appendChild(userDiv);
+                });
+            }
+        }
+        
+        // 4. Отправка сообщения
         function sendMessage() {
             const input = document.getElementById('messageInput');
             const text = input.value.trim();
             
-            if (!text) {
-                console.log('⚠️ Пустое сообщение');
+            if (!text || !currentUser.id) {
+                console.log('⚠️ Пустое сообщение или нет пользователя');
                 return;
             }
             
             if (!socket.connected) {
                 console.error('❌ WebSocket не подключен!');
-                alert('Нет соединения! Обнови страницу.');
+                alert('Нет соединения с сервером. Пожалуйста, обновите страницу.');
                 return;
             }
             
-            console.log('📤 Отправляю:', text);
+            console.log('📤 Отправка сообщения:', text);
             
             socket.emit('send_message', {
                 userId: currentUser.id,
@@ -161,22 +246,32 @@
             input.focus();
         }
         
-        // 4. Тестовое сообщение
-        function testMessage() {
-            if (!socket.connected) {
-                alert('WebSocket не подключен!');
-                return;
+        // 5. Загрузка истории сообщений
+        async function loadMessages() {
+            try {
+                console.log('📜 Загрузка истории сообщений...');
+                const response = await fetch('/api/messages');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    console.log(`✅ Загружено ${data.messages.length} сообщений`);
+                    displayMessages(data.messages);
+                    document.getElementById('messageCount').textContent = 
+                        `${data.messages.length} сообщений`;
+                } else {
+                    console.error('❌ Ошибка загрузки сообщений:', data.message);
+                }
+            } catch (error) {
+                console.error('❌ Ошибка загрузки сообщений:', error);
             }
-            
-            socket.emit('send_message', {
-                userId: 999,
-                text: 'Тестовое сообщение ' + new Date().toLocaleTimeString()
-            });
-            
-            alert('Тестовое сообщение отправлено!');
         }
         
-        // 5. Отображение сообщений
+        // 6. Отображение сообщений
         function displayMessages(messages) {
             const container = document.getElementById('chatMessages');
             if (!container) return;
@@ -199,32 +294,227 @@
                             </strong>
                             <span class="message-time">${formatTime(msg.timestamp)}</span>
                         </div>
-                        <div class="message-text">${msg.text}</div>
+                        <div class="message-text">${escapeHtml(msg.text)}</div>
                     </div>
                 `;
                 container.appendChild(messageDiv);
             });
             
+            // Прокрутка вниз
             container.scrollTop = container.scrollHeight;
+        }
+        
+        // 7. Показать профиль пользователя
+        function showProfile(userId) {
+            selectedUserId = userId;
+            const modal = document.getElementById('profileModal');
+            const adminActions = document.getElementById('adminActions');
+            
+            console.log('👤 Загрузка профиля пользователя ID:', userId);
+            
+            // Загружаем данные пользователя
+            fetch(`/api/user/${userId}`)
+                .then(res => {
+                    if (!res.ok) {
+                        throw new Error(`HTTP error! status: ${res.status}`);
+                    }
+                    return res.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        const user = data.user;
+                        console.log('✅ Профиль загружен:', user.nickname);
+                        
+                        document.getElementById('profileContent').innerHTML = `
+                            <div style="text-align: center;">
+                                <div class="profile-avatar" style="background-color: ${user.avatar_color}; 
+                                     margin: 0 auto 15px; width: 80px; height: 80px; font-size: 32px; 
+                                     display: flex; align-items: center; justify-content: center; 
+                                     border-radius: 50%; color: white; font-weight: bold;">
+                                    ${user.nickname.charAt(0).toUpperCase()}
+                                </div>
+                                <h3>${user.nickname}</h3>
+                                <p><strong>Telegram:</strong> ${user.tg_username || 'Не указан'}</p>
+                                <p><strong>Роль:</strong> ${user.role === 'admin' ? '👑 Админ' : '👤 Пользователь'}</p>
+                                <p><strong>Зарегистрирован:</strong> ${new Date(user.created_at).toLocaleDateString()}</p>
+                                <p><strong>Статус:</strong> ${user.is_banned ? '❌ Забанен' : '✅ Активен'}</p>
+                            </div>
+                        `;
+                        
+                        // Показываем кнопки админа только если текущий пользователь админ
+                        if (currentUser.role === 'admin' && user.id !== currentUser.id) {
+                            adminActions.style.display = 'block';
+                        } else {
+                            adminActions.style.display = 'none';
+                        }
+                        
+                        modal.style.display = 'block';
+                    } else {
+                        console.error('❌ Ошибка загрузки профиля:', data.message);
+                        alert('Ошибка загрузки профиля: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('❌ Ошибка загрузки профиля:', error);
+                    alert('Ошибка загрузки профиля. Проверьте соединение с сервером.');
+                });
+        }
+        
+        // 8. Закрыть профиль
+        function closeProfile() {
+            const modal = document.getElementById('profileModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+        
+        // 9. Действия админа
+        async function banUser() {
+            if (!selectedUserId) return;
+            if (!confirm('Забанить пользователя?')) return;
+            
+            try {
+                const response = await fetch('/api/admin/ban-user', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        userId: selectedUserId, 
+                        action: 'ban' 
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    alert('Пользователь забанен');
+                    closeProfile();
+                } else {
+                    alert('Ошибка: ' + data.message);
+                }
+            } catch (error) {
+                console.error('❌ Ошибка бана:', error);
+                alert('Ошибка соединения с сервером');
+            }
+        }
+        
+        async function muteUser() {
+            if (!selectedUserId) return;
+            
+            try {
+                const response = await fetch('/api/admin/user-action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        adminId: currentUser.id,
+                        targetUserId: selectedUserId, 
+                        action: 'mute',
+                        duration: 5
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    alert('Пользователь замьючен на 5 минут');
+                    closeProfile();
+                } else {
+                    alert('Ошибка: ' + data.message);
+                }
+            } catch (error) {
+                console.error('❌ Ошибка мута:', error);
+                alert('Ошибка соединения с сервером');
+            }
+        }
+        
+        async function makeAdmin() {
+            if (!selectedUserId) return;
+            if (!confirm('Сделать этого пользователя админом?')) return;
+            
+            try {
+                const response = await fetch('/api/admin/ban-user', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        userId: selectedUserId, 
+                        action: 'make_admin' 
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    alert('Пользователь теперь админ');
+                    closeProfile();
+                } else {
+                    alert('Ошибка: ' + data.message);
+                }
+            } catch (error) {
+                console.error('❌ Ошибка назначения админа:', error);
+                alert('Ошибка соединения с сервером');
+            }
+        }
+        
+        // 10. Тест соединения
+        function testConnection() {
+            console.log('🔧 Тестирование соединения...');
+            
+            // Проверяем API
+            fetch('/api/test')
+                .then(res => res.json())
+                .then(data => {
+                    console.log('✅ API тест:', data);
+                    
+                    // Проверяем WebSocket
+                    if (socket.connected) {
+                        console.log('✅ WebSocket подключен:', socket.id);
+                        alert('✅ Соединение отлично!\nAPI: Работает\nWebSocket: Подключен\nID: ' + socket.id);
+                    } else {
+                        console.log('❌ WebSocket не подключен');
+                        alert('⚠️ API работает, но WebSocket не подключен. Попробуйте обновить страницу.');
+                    }
+                })
+                .catch(error => {
+                    console.error('❌ API тест не прошёл:', error);
+                    alert('❌ Нет соединения с сервером. Проверьте интернет или перезагрузите страницу.');
+                });
+        }
+        
+        // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+        
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
         
         // ========== WebSocket СОБЫТИЯ ==========
         
         socket.on('connect', () => {
-            console.log('✅ WebSocket подключен!');
+            console.log('✅ WebSocket подключен! ID:', socket.id);
             socket.emit('get_history');
+            
+            // Если пользователь авторизован, сообщаем о его онлайн-статусе
+            if (currentUser.id) {
+                socket.emit('user_online', {
+                    id: currentUser.id,
+                    nickname: currentUser.nickname,
+                    avatar_color: currentUser.avatar_color
+                });
+            }
         });
         
         socket.on('message_history', (messages) => {
-            console.log('📜 История:', messages.length, 'сообщений');
+            console.log('📜 Получена история сообщений:', messages.length);
             displayMessages(messages);
         });
         
         socket.on('new_message', (message) => {
-            console.log('📨 Новое сообщение:', message.text);
+            console.log('📨 Новое сообщение получено:', message.text);
             
-            const container = document.getElementById('chatMessages');
-            if (!container) return;
+            const messagesContainer = document.getElementById('chatMessages');
+            if (!messagesContainer) return;
             
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message';
@@ -241,64 +531,99 @@
                         </strong>
                         <span class="message-time">${formatTime(message.timestamp)}</span>
                     </div>
-                    <div class="message-text">${message.text}</div>
+                    <div class="message-text">${escapeHtml(message.text)}</div>
                 </div>
             `;
-            container.appendChild(messageDiv);
-            container.scrollTop = container.scrollHeight;
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            // Обновляем счетчик сообщений
+            const messageCount = document.getElementById('messageCount');
+            if (messageCount) {
+                const current = parseInt(messageCount.textContent) || 0;
+                messageCount.textContent = `${current + 1} сообщений`;
+            }
+        });
+        
+        socket.on('update_online_users', (users) => {
+            console.log('👥 Обновление онлайн пользователей:', users.length);
+            updateOnlineUsers(users);
+        });
+        
+        socket.on('admin_action', (data) => {
+            console.log('🔨 Действие админа:', data);
+            if (data.userId === currentUser.id && data.action === 'ban') {
+                alert('Вы были забанены!');
+                localStorage.removeItem('user');
+                window.location.href = '/index.html';
+            }
         });
         
         socket.on('error', (data) => {
             console.error('❌ WebSocket ошибка:', data);
+            alert('Ошибка WebSocket: ' + data.message);
         });
         
         socket.on('disconnect', () => {
             console.log('❌ WebSocket отключен');
         });
         
-        // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+        socket.on('connect_error', (error) => {
+            console.error('❌ Ошибка подключения WebSocket:', error);
+        });
         
-        function formatTime(timestamp) {
-            const date = new Date(timestamp);
-            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        }
-        
-        // ========== АДМИН ФУНКЦИИ ==========
-        
-        function showProfile(userId) {
-            alert('Профиль пользователя ID: ' + userId);
-        }
-        
-        function banUser() {
-            alert('Бан пользователя');
-        }
-        
-        function muteUser() {
-            alert('Мут на 5 минут');
-        }
-        
-        function makeAdmin() {
-            alert('Сделать админом');
-        }
-        
-        function closeProfile() {
-            const modal = document.getElementById('profileModal');
-            if (modal) {
-                modal.style.display = 'none';
-            }
-        }
-        
-        // ========== КЛАВИАТУРА ==========
+        // ========== ОБРАБОТЧИКИ СОБЫТИЙ ==========
         
         document.getElementById('messageInput')?.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') sendMessage();
         });
         
-        // ========== ЗАГРУЗКА СТРАНИЦЫ ==========
+        window.onclick = function(event) {
+            const modal = document.getElementById('profileModal');
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        }
+        
+        window.addEventListener('beforeunload', () => {
+            if (currentUser.id) {
+                socket.emit('user_offline', { id: currentUser.id });
+            }
+        });
+        
+        // ========== ИНИЦИАЛИЗАЦИЯ ==========
         
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('🚀 Чат загружается...');
+            console.log('🚀 Чат инициализируется...');
+            
+            // Загружаем данные пользователя
             loadUserData();
+            
+            // Загружаем сообщения через API
+            loadMessages();
+            
+            // Загружаем список пользователей через API
+            setTimeout(() => {
+                if (currentUser.role === 'admin') {
+                    fetch('/api/admin/users?adminId=' + currentUser.id)
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                updateOnlineUsers(data.users);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('❌ Ошибка загрузки пользователей:', error);
+                        });
+                }
+            }, 2000);
+            
+            // Периодическая проверка соединения
+            setInterval(() => {
+                if (!socket.connected) {
+                    console.log('🔄 Попытка переподключения WebSocket...');
+                }
+            }, 30000);
         });
     </script>
 </body>
