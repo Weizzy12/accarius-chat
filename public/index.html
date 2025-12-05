@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Приватный Чат - Вход</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Шаг 1: Ввод кода -->
+        <div class="login-box" id="step1">
+            <h1><i class="fas fa-lock"></i> Приватный Чат</h1>
+            <p>Для входа требуется инвайт-код</p>
+            
+            <div class="form-group">
+                <input type="text" 
+                       id="inviteCode" 
+                       placeholder="Введите инвайт-код" 
+                       class="form-input"
+                       value="ADMIN123">
+                <button class="btn btn-primary" onclick="checkCode()">
+                    <i class="fas fa-key"></i> Проверить код
+                </button>
+            </div>
+            
+            <div id="error" class="error-message"></div>
+            <div id="success" class="success-message"></div>
+        </div>
+        
+        <!-- Шаг 2: Регистрация -->
+        <div class="login-box" id="step2" style="display: none;">
+            <h1><i class="fas fa-user-plus"></i> Создание профиля</h1>
+            <p>Код принят! Заполните данные:</p>
+            
+            <div class="form-group">
+                <input type="text" 
+                       id="nickname" 
+                       placeholder="Ваше имя в чате" 
+                       class="form-input">
+                <input type="text" 
+                       id="tgUsername" 
+                       placeholder="@username в Telegram" 
+                       class="form-input">
+                <button class="btn btn-primary" onclick="register()">
+                    <i class="fas fa-sign-in-alt"></i> Войти в чат
+                </button>
+            </div>
+            
+            <div id="error2" class="error-message"></div>
+        </div>
+    </div>
+
+    <script>
+        // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
+        let currentCodeId = null;
+        
+        // ========== ФУНКЦИЯ ПРОВЕРКИ КОДА ==========
+        async function checkCode() {
+            console.log('🔐 Проверка инвайт-кода...');
+            
+            const codeInput = document.getElementById('inviteCode');
+            const code = codeInput.value.trim();
+            
+            // Валидация
+            if (!code) {
+                showError('Введите код доступа');
+                return;
+            }
+            
+            // Показываем загрузку
+            const button = document.querySelector('#step1 .btn');
+            const originalText = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Проверяем...';
+            button.disabled = true;
+            
+            try {
+                // Отправка запроса
+                const response = await fetch('/api/check-code', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ code: code })
+                });
+                
+                // Проверка статуса
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Ответ сервера:', data);
+                
+                if (data.success) {
+                    // Сохраняем ID кода
+                    currentCodeId = data.codeId;
+                    
+                    // Показываем успех
+                    showSuccess('✅ Код принят! Заполните профиль', 'step1');
+                    
+                    // Переход к регистрации
+                    setTimeout(() => {
+                        document.getElementById('step1').style.display = 'none';
+                        document.getElementById('step2').style.display = 'block';
+                        
+                        // Автофокус на поле имени
+                        const nicknameInput = document.getElementById('nickname');
+                        nicknameInput.focus();
+                    }, 1000);
+                    
+                } else {
+                    showError(data.message || 'Неверный код доступа', 'step1');
+                }
+                
+            } catch (error) {
+                console.error('❌ Ошибка при проверке кода:', error);
+                showError('Ошибка соединения с сервером. Проверьте интернет.', 'step1');
+                
+            } finally {
+                // Восстанавливаем кнопку
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+        
+        // ========== ФУНКЦИЯ РЕГИСТРАЦИИ ==========
+        async function register() {
+            console.log('👤 Регистрация пользователя...');
+            
+            const nickname = document.getElementById('nickname').value.trim();
+            const tgUsername = document.getElementById('tgUsername').value.trim();
+            
+            // Валидация
+            if (!nickname) {
+                showError('Введите имя для отображения в чате', 'step2');
+                return;
+            }
+            
+            if (!tgUsername) {
+                showError('Введите ваш Telegram username', 'step2');
+                return;
+            }
+            
+            // Форматируем Telegram username
+            const formattedTg = tgUsername.startsWith('@') ? tgUsername : '@' + tgUsername;
+            
+            // Показываем загрузку
+            const button = document.querySelector('#step2 .btn');
+            const originalText = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Регистрируем...';
+            button.disabled = true;
+            
+            try {
+                // Отправка запроса
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        nickname: nickname,
+                        tgUsername: formattedTg,
+                        codeId: currentCodeId
+                    })
+                });
+                
+                // Проверка статуса
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Ответ регистрации:', data);
+                
+                if (data.success) {
+                    // Сохраняем данные пользователя
+                    localStorage.setItem('chat_user', JSON.stringify(data.user));
+                    console.log('✅ Пользователь сохранён:', data.user);
+                    
+                    // Показываем успех
+                    showSuccess('✅ Регистрация успешна! Перенаправляем в чат...', 'step2');
+                    
+                    // Переход в чат
+                    setTimeout(() => {
+                        window.location.href = 'chat.html';
+                    }, 1500);
+                    
+                } else {
+                    showError(data.message || 'Ошибка регистрации', 'step2');
+                }
+                
+            } catch (error) {
+                console.error('❌ Ошибка при регистрации:', error);
+                showError('Ошибка соединения с сервером', 'step2');
+                
+            } finally {
+                // Восстанавливаем кнопку
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+        
+        // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+        function showError(message, step) {
+            console.error('❌ Ошибка:', message);
+            
+            const errorDiv = document.getElementById(step === 'step2' ? 'error2' : 'error');
+            if (errorDiv) {
+                errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${message}`;
+                errorDiv.style.display = 'block';
+                
+                // Скрываем через 5 секунд
+                setTimeout(() => {
+                    errorDiv.style.display = 'none';
+                }, 5000);
+            }
+            
+            // Скрываем успешное сообщение если есть
+            const successDiv = document.getElementById('success');
+            if (successDiv) successDiv.style.display = 'none';
+        }
+        
+        function showSuccess(message, step) {
+            console.log('✅ Успех:', message);
+            
+            const successDiv = document.getElementById('success');
+            if (successDiv) {
+                successDiv.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
+                successDiv.style.display = 'block';
+            }
+            
+            // Скрываем ошибку если есть
+            const errorDiv = document.getElementById(step === 'step2' ? 'error2' : 'error');
+            if (errorDiv) errorDiv.style.display = 'none';
+        }
+        
+        // ========== ОБРАБОТЧИКИ СОБЫТИЙ ==========
+        
+        // Enter для проверки кода
+        document.getElementById('inviteCode').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                checkCode();
+            }
+        });
+        
+        // Enter для регистрации
+        document.getElementById('nickname').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                register();
+            }
+        });
+        
+        document.getElementById('tgUsername').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                register();
+            }
+        });
+        
+        // ========== ИНИЦИАЛИЗАЦИЯ ==========
+        window.addEventListener('DOMContentLoaded', function() {
+            console.log('✅ Страница входа загружена');
+            
+            // Проверяем API
+            fetch('/api/test')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('API статус:', data);
+                    
+                    // Если пользователь уже авторизован - редирект в чат
+                    const savedUser = localStorage.getItem('chat_user');
+                    if (savedUser) {
+                        console.log('Найден сохранённый пользователь, редирект...');
+                        window.location.href = 'chat.html';
+                    }
+                })
+                .catch(error => {
+                    console.error('❌ API недоступен:', error);
+                    showError('Сервер временно недоступен', 'step1');
+                });
+                
+            // Автофокус на поле кода
+            const codeInput = document.getElementById('inviteCode');
+            if (codeInput) {
+                codeInput.focus();
+                codeInput.select();
+            }
+        });
+        
+        // ========== ДЕБАГ ФУНКЦИИ ==========
+        window.debugCheckCode = function() {
+            console.log('🛠 Принудительный вызов checkCode()');
+            checkCode();
+        };
+        
+        window.debugRegister = function() {
+            console.log('🛠 Принудительный вызов register()');
+            register();
+        };
+    </script>
+</body>
+</html>
