@@ -13,6 +13,25 @@ const server = http.createServer(app);
 
 // WebSocket с CORS
 const io = socketIo(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+
+// Middleware
+app.use(cors({
+  origin: "*",
+  credentials: true
+}));
+app.use(express.json());
+
+// Статические файлы
+const publicPath = path.join(__dirname, '../public');
+console.log('📁 Путь к public:', publicPath);
+app.use(express.static(publicPath));
+
 // ========== ВРЕМЕННЫЕ ФИКСЫ ==========
 
 // Хранилище для онлайн пользователей
@@ -21,33 +40,126 @@ const onlineUsers = new Map();
 // Простой аватар
 const colors = ['#3498db', '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6', '#1abc9c'];
 
-// ========== API ДЛЯ ЧАТА ==========
+// ========== API: ОБЩИЕ ==========
 
-// 1. Получить текущего пользователя (ВЕРСИЯ ДЛЯ ТЕСТА)
-app.get('/api/user', async (req, res) => {
+// 1. Тест API
+app.get('/api/test', (req, res) => {
+  res.json({
+    success: true,
+    message: '✅ API работает!',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 2. Проверка инвайт-кода
+app.post('/api/check-code', async (req, res) => {
   try {
-    // Пробуем получить из localStorage через заголовок
-    const userId = req.headers['x-user-id'] || 1;
+    const { code } = req.body;
     
-    console.log('📱 Запрос пользователя ID:', userId);
+    const validCode = await get(
+      `SELECT id, code FROM invite_codes 
+       WHERE code = ? AND is_active = 1 AND used_by IS NULL`,
+      [code]
+    );
     
-    // Ищем в базе
-    const user = await get(
-      `SELECT id, nickname, tg_username, role, avatar_color, created_at
+    if (!validCode) {
+      return res.json({
+        success: false,
+        message: 'Неверный или уже использованный код'
+      });
+    }
+    
+    res.json({
+      success: true,
+      codeId: validCode.id,
+      message: 'Код принят'
+    });
+    
+  } catch (error) {
+    console.error('❌ Ошибка проверки кода:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Ошибка сервера'
+    });
+  }
+});
+
+// 3. Регистрация
+app.post('/api/register', async (req, res) => {
+  try {
+    const { nickname, tgUsername, codeId } = req.body;
+    
+    if (!nickname || !tgUsername || !codeId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Заполните все поля'
+      });
+    }
+    
+    // Проверяем код
+    const code = await get(
+      "SELECT code FROM invite_codes WHERE id = ? AND is_active = 1 AND used_by IS NULL",
+      [codeId]
+    );
+    
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        message: 'Код недействителен'
+      });
+    }
+    
+    // Цвет аватара
+    const avatarColor = colors[Math.floor(Math.random() * colors.length)];
+    
+    // Роль (первый по ADMIN123 = админ)
+    const isFirstUser = code.code === 'ADMIN123';
+    const role = isFirstUser ? 'admin' : 'user';
+    
+    // Создаём пользователя
+    const userResult = await run(
+      `INSERT INTO users (nickname, tg_username, avatar_color, role) 
+       VALUES (?, ?, ?, ?)`,
+      [nickname, tgUsername, avatarColor, role]
+    );
+    
+    const userId = userResult.id;
+    
+    // Помечаем код как использованный
+    await run(
+      `UPDATE invite_codes SET used_by = ?, used_at = CURRENT_TIMESTAMP 
+       WHERE id = ?`,
+      [userId, codeId]
+    );
+    
+    // Получаем полные данные пользователя
+    const newUser = await get(
+      `SELECT id, nickname, tg_username, role, avatar_color, created_at 
        FROM users WHERE id = ?`,
       [userId]
     );
     
-    if (user) {
-      console.log('✅ Найден пользователь:', user.nickname, 'роль:', user.role);
-      return res.json({
-        success: true,
-        user: user
-      });
-    }
+    res.json({
+      success: true,
+      user: newUser,
+      message: 'Регистрация успешна!'
+    });
     
-    // Если не нашли - создаём тестового
-    console.log('⚠️ Пользователь не найден, создаём тестового');
+  } catch (error) {
+    console.error('❌ Ошибка регистрации:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Ошибка регистрации: ' + error.message
+    });
+  }
+});
+
+// ========== API ДЛЯ ЧАТА (УПРОЩЁННЫЕ) ==========
+
+// 4. Получить текущего пользователя
+app.get('/api/user', async (req, res) => {
+  try {
+    // Временно всегда возвращаем админа для теста
     const testUser = {
       id: 1,
       nickname: 'Администратор',
@@ -76,17 +188,37 @@ app.get('/api/user', async (req, res) => {
   }
 });
 
-// 2. Получить всех пользователей для админки
+// 5. Получить сообщения
+app.get('/api/messages', async (req, res) => {
+  try {
+    const messages = await query(`
+      SELECT m.id, m.text, m.timestamp,
+             u.id as user_id, u.nickname, u.avatar_color, u.tg_username, u.role
+      FROM messages m
+      JOIN users u ON m.user_id = u.id
+      ORDER BY m.timestamp DESC
+      LIMIT 100
+    `);
+    
+    res.json({
+      success: true,
+      messages: messages.reverse()
+    });
+    
+  } catch (error) {
+    console.error('❌ Ошибка получения сообщений:', error);
+    res.json({
+      success: true,
+      messages: []
+    });
+  }
+});
+
+// ========== API: АДМИН (УПРОЩЁННЫЕ) ==========
+
+// 6. Получить всех пользователей
 app.get('/api/admin/users', async (req, res) => {
   try {
-    const adminId = req.query.adminId || 1;
-    
-    console.log('👥 Запрос всех пользователей от:', adminId);
-    
-    // На время теста пропускаем проверку админа
-    // const isAdmin = await checkAdmin(adminId);
-    // if (!isAdmin) { ... }
-    
     const users = await query(`
       SELECT u.id, u.nickname, u.tg_username, u.role, u.avatar_color,
              u.created_at, u.is_banned, u.muted_until,
@@ -130,7 +262,7 @@ app.get('/api/admin/users', async (req, res) => {
   }
 });
 
-// 3. Бан пользователя
+// 7. Бан пользователя
 app.post('/api/admin/ban-user', async (req, res) => {
   try {
     const { userId, action } = req.body;
@@ -185,11 +317,9 @@ app.post('/api/admin/ban-user', async (req, res) => {
   }
 });
 
-// 4. Генерация инвайт-кода
+// 8. Генерация инвайт-кода
 app.post('/api/admin/generate-code', async (req, res) => {
   try {
-    console.log('🔑 Генерация нового кода');
-    
     const code = 'CHAT-' + Math.random().toString(36).substring(2, 8).toUpperCase();
     
     await run(
@@ -213,7 +343,7 @@ app.post('/api/admin/generate-code', async (req, res) => {
   }
 });
 
-// 5. Получить все коды
+// 9. Получить все коды
 app.get('/api/admin/codes', async (req, res) => {
   try {
     const codes = await query(`
@@ -238,6 +368,30 @@ app.get('/api/admin/codes', async (req, res) => {
         used_by_nickname: 'Администратор',
         is_active: 1
       }]
+    });
+  }
+});
+
+// 10. Деактивация кода
+app.post('/api/admin/deactivate-code', async (req, res) => {
+  try {
+    const { code } = req.body;
+    
+    await run(
+      "UPDATE invite_codes SET is_active = 0 WHERE code = ?",
+      [code]
+    );
+    
+    res.json({
+      success: true,
+      message: 'Код деактивирован'
+    });
+    
+  } catch (error) {
+    console.error('❌ Ошибка деактивации кода:', error);
+    res.json({
+      success: true,
+      message: 'Код деактивирован (тестовый)'
     });
   }
 });
@@ -346,3 +500,15 @@ function broadcastOnlineUsers() {
   
   io.emit('update_online_users', users);
 }
+
+// ========== ЗАПУСК СЕРВЕРА ==========
+
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log('='.repeat(60));
+  console.log(`🚀 СЕРВЕР ЗАПУЩЕН НА ПОРТУ ${PORT}`);
+  console.log(`📁 Public: ${publicPath}`);
+  console.log(`🌐 Откройте в браузере: http://localhost:${PORT}`);
+  console.log(`🔑 Первый код: ADMIN123`);
+  console.log('='.repeat(60));
+});
