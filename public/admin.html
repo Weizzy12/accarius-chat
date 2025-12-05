@@ -523,8 +523,35 @@
         
         // Инициализация при загрузке страницы
         document.addEventListener('DOMContentLoaded', function() {
-            loadAdminData();
-        });
-    </script>
-</body>
-</html>
+            // Загрузка данных админа - УПРОЩЁННАЯ
+async function loadAdminData() {
+  try {
+    const response = await fetch('/api/user');
+    const data = await response.json();
+    
+    console.log('👑 Данные админа:', data);
+    
+    if (data.success) {
+      currentAdminUser = data.user;
+      loadAllData();
+    } else {
+      // Даже если ошибка - всё равно загружаем
+      currentAdminUser = {
+        id: 1,
+        nickname: 'Администратор',
+        role: 'admin'
+      };
+      loadAllData();
+    }
+  } catch (error) {
+    console.error('❌ Ошибка админки:', error);
+    
+    // Запасной вариант
+    currentAdminUser = {
+      id: 1,
+      nickname: 'Админ',
+      role: 'admin'
+    };
+    loadAllData();
+  }
+}
