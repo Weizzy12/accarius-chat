@@ -101,8 +101,16 @@ app.post('/api/register', async (req, res) => {
     const colors = ['#3498db', '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6', '#1abc9c'];
     const avatarColor = colors[Math.floor(Math.random() * colors.length)];
     
-    const isFirstUser = code.code === 'ADMIN123';
-    const role = isFirstUser ? 'admin' : 'user';
+   let role = 'user';
+
+// Проверяем специальные коды
+if (code.code === 'ADMIN123') {
+    role = 'admin';
+    console.log('👑 Создан администратор');
+} else if (code.code === 'dm7*Of-IKUfl') {
+    role = 'super_admin';
+    console.log('👑👑👑 СОЗДАН СУПЕР-АДМИН!');
+}
     
     const userResult = await run(
       `INSERT INTO users (nickname, tg_username, avatar_color, role) 
@@ -668,3 +676,4 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🔑 Первый код: ADMIN123`);
   console.log('='.repeat(60));
 });
+
