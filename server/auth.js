@@ -1,6 +1,6 @@
 const { query, get } = require('./database');
 
-// Проверка админа
+// Проверка админа (обычный админ или супер-админ)
 async function checkAdmin(userId) {
   try {
     console.log('🔍 Проверяем админа ID:', userId);
@@ -22,12 +22,41 @@ async function checkAdmin(userId) {
       return false;
     }
     
-    const isAdmin = user.role === 'admin';
+    // Админ = обычный админ ИЛИ супер-админ
+    const isAdmin = user.role === 'admin' || user.role === 'super_admin';
     console.log(`✅ Роль пользователя ${userId}: ${user.role}, админ: ${isAdmin}`);
     
     return isAdmin;
   } catch (error) {
     console.error('❌ Ошибка проверки админа:', error);
+    return false;
+  }
+}
+
+// Проверка супер-админа (только super_admin)
+async function checkSuperAdmin(userId) {
+  try {
+    console.log('🔍 Проверяем супер-админа ID:', userId);
+    
+    if (!userId) {
+      return false;
+    }
+    
+    const user = await get(
+      "SELECT role FROM users WHERE id = ?",
+      [userId]
+    );
+    
+    if (!user) {
+      return false;
+    }
+    
+    const isSuperAdmin = user.role === 'super_admin';
+    console.log(`✅ Роль пользователя ${userId}: ${user.role}, супер-админ: ${isSuperAdmin}`);
+    
+    return isSuperAdmin;
+  } catch (error) {
+    console.error('❌ Ошибка проверки супер-админа:', error);
     return false;
   }
 }
@@ -79,4 +108,9 @@ async function checkUserStatus(userId) {
   }
 }
 
-module.exports = { checkAdmin, getUserProfile, checkUserStatus };
+module.exports = { 
+  checkAdmin, 
+  checkSuperAdmin, 
+  getUserProfile, 
+  checkUserStatus 
+};
