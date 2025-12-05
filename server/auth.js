@@ -1,12 +1,14 @@
 const { query, get } = require('./database');
 
-// Проверка админа - УПРОЩЁННАЯ ВЕРСИЯ
+// Проверка админа
 async function checkAdmin(userId) {
   try {
     console.log('🔍 Проверяем админа ID:', userId);
     
-    // Если userId нет - пропускаем (для теста)
-    if (!userId) return true;
+    if (!userId) {
+      console.log('⚠️ Нет userId, возвращаем false');
+      return false;
+    }
     
     const user = await get(
       "SELECT role FROM users WHERE id = ?",
@@ -15,21 +17,18 @@ async function checkAdmin(userId) {
     
     console.log('Найден пользователь:', user);
     
-    // Если пользователь не найден - всё равно даём админку для первого
     if (!user) {
-      // Первый пользователь = админ
-      const allUsers = await query("SELECT COUNT(*) as count FROM users");
-      if (allUsers[0].count === 0) {
-        return true;
-      }
+      console.log('⚠️ Пользователь не найден в базе');
       return false;
     }
     
-    return user && user.role === 'admin';
+    const isAdmin = user.role === 'admin';
+    console.log(`✅ Роль пользователя ${userId}: ${user.role}, админ: ${isAdmin}`);
+    
+    return isAdmin;
   } catch (error) {
     console.error('❌ Ошибка проверки админа:', error);
-    // На время теста всегда true
-    return true;
+    return false;
   }
 }
 
@@ -49,33 +48,34 @@ async function getUserProfile(userId) {
   }
 }
 
-// Проверка бана/мута - УПРОЩЁННАЯ
+// Проверка бана/мута
 async function checkUserStatus(userId) {
   try {
-    // На время теста всегда разрешаем
-    return { canSend: true };
-    
-    /* Реальная проверка:
     const user = await get(
       "SELECT is_banned, muted_until FROM users WHERE id = ?",
       [userId]
     );
     
-    if (!user) return { canSend: false, reason: 'Пользователь не найден' };
+    if (!user) {
+      console.log(`⚠️ Пользователь ${userId} не найден при проверке статуса`);
+      return { canSend: false, reason: 'Пользователь не найден' };
+    }
+    
+    console.log(`🔍 Статус пользователя ${userId}: забанен=${user.is_banned}, мут до=${user.muted_until}`);
     
     if (user.is_banned) {
       return { canSend: false, reason: 'Вы забанены' };
     }
     
     if (user.muted_until && new Date(user.muted_until) > new Date()) {
-      return { canSend: false, reason: 'Вы замьючены' };
+      const muteTime = Math.round((new Date(user.muted_until) - new Date()) / 60000);
+      return { canSend: false, reason: `Вы замьючены на ${muteTime} минут` };
     }
     
     return { canSend: true };
-    */
   } catch (error) {
     console.error('Ошибка проверки статуса:', error);
-    return { canSend: true }; // На время теста всегда true
+    return { canSend: false, reason: 'Ошибка сервера' };
   }
 }
 
