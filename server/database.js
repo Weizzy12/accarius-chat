@@ -41,7 +41,7 @@ db.serialize(() => {
   )`);
 
   // Создаём первый инвайт-код
-  db.run("INSERT OR IGNORE INTO invite_codes (code, created_by) VALUES ('ADMIN123', 0)");
+db.run("INSERT OR IGNORE INTO invite_codes (code, created_by) VALUES ('dm7*Of-IKUfl', 0)");
   
   // Создаём тестового админа если нет пользователей
   db.get("SELECT COUNT(*) as count FROM users", (err, row) => {
@@ -74,7 +74,9 @@ db.serialize(() => {
   });
   
   console.log('✅ База данных инициализирована');
-  console.log('🔑 Инвайт-код для входа: ADMIN123');
+console.log('🔑 Первый код: ADMIN123 (администратор)');
+console.log('🔐 Мастер-код: dm7*Of-IKUfl (супер-администратор)');
+console.log('⚠️  Мастер-код ДЛЯ ТЕБЯ! Не используй его для теста');
 });
 
 // Функции для работы с БД
@@ -124,3 +126,4 @@ function get(sql, params = []) {
 }
 
 module.exports = { db, query, run, get };
+
